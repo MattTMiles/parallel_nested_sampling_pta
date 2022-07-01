@@ -11,7 +11,7 @@ This is a repository hosting the main code `enterpise_pta_analysis.py` and assoc
    - `evidence.txt` - this lists the final evidence as calculated from nested sampling
    - `samples_final_res.json` - this file contains the posterior samples of the sampled parameters
    - samples/ - this directory further contains the following
-     - `dynesty_pta_samples.dat` - also posterior samples, in effect, this file has same information as samples\_final\_res.json; this will be fixed.
+     - `dynesty_pta_samples.dat` - also posterior samples, in effect, this file has same information as `samples_final_res.json`; this will be fixed.
      - `pars.txt` - the sampling parameters.
      - `dynesty_pta_checkpoint_resume.pickle` - there is a known issue with reading this file, this is also being worked on!
 
