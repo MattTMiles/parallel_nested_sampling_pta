@@ -1,0 +1,48 @@
+#! /bin/bash
+#PBS -S /bin/bash
+
+#################################
+## Script to run ExoGAN on Cobweb using singularity
+##################################
+
+## Name of job displayed in the queue
+#PBS -N label-for-this-run 
+
+##run parameters
+##Maximum runtime: HH:MM:SS
+#PBS -l walltime=960:00:00       
+##PBS -l select=1:ncpus=48:mpiprocs=48
+#PBS -l nodes=1:ppn=48 
+#PBS -q workq
+#PBS -l mem=50gb
+
+##error output and path variables
+#PBS -o my_output.out
+#PBS -e my_output.err
+#PBS -V
+
+cd $PBS_O_WORKDIR
+NCPU=`wc -l < $PBS_NODEFILE`
+echo 'This job is allocated on '${NCPU}' cpu(s)'
+echo 'Job is running on node(s): '
+cat $PBS_NODEFILE
+
+NP=$(wc -l $PBS_NODEFILE | awk '{print $1}')
+
+export OMP_NUM_THREADS=1
+export I_MPI_DEBUG=4
+export PMIX_MCA_gds=hash
+export MPLCONFIGDIR=/tmp/matplotlib-writable/
+
+export PATH_TO_SINGULARITY_IMAGE=/path/to/image/filename.sif
+
+module load openmpi
+
+singularity exec -e -B /opt/pbs/ -B /var/spool/pbs/aux/ \
+            -B /path/to/par/and/tim/files \
+            --env MPLCONFIGDIR=/tmp/matplotlib-writable/ \
+            --env PBS_NODEFILE=${PBS_NODEFILE} \
+            ${PATH_TO_SINGULARITY_IMAGE} mpiexec --hostfile $PBS_NODEFILE \
+                -n $NP \
+                python /path/to/enterprise_pta_analysis.py
+
