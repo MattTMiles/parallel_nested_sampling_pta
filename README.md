@@ -30,3 +30,9 @@ This code was first used in the following paper, so please acknowledge the follo
   	}
 
 In addition, the code very heavily relies on the open-source code, [parallel bilby](https://git.ligo.org/lscsoft/parallel_bilby). Appropriate acknowledgements have been made in the paper [Samajdar *et al.*](https://arxiv.org/abs/2205.04332).
+
+<p align="middle">
+  <img src="https://user-images.githubusercontent.com/108532307/177641610-73d9221c-34fc-4aec-afc0-0dbcfae65ccc.jpg" width="45%" />
+  <img src="https://user-images.githubusercontent.com/108532307/177641651-f1c10724-d4a8-4e06-8612-36cabeef0231.jpg" width="45%" /> 
+</p>
+
