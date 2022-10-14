@@ -19,17 +19,18 @@ This is a repository hosting the main code `enterpise_pta_analysis.py` and assoc
 
 This code was first used in the following paper, so please acknowledge the following if you use this software for your work:
 
-     @article{Samajdar:2022qhm,
-    	author = "Samajdar, A. and others",
-    	title = "{Robust parameter estimation from pulsar timing data}",
-    	eprint = "2205.04332",
-    	archivePrefix = "arXiv",
-    	primaryClass = "gr-qc",
-    	month = "5",
-    	year = "2022"
-  	}
+      @article{Samajdar:2022qhm,
+            author = "Samajdar, A. and others",
+            title = "{Robust parameter estimation from pulsar timing data}",
+            eprint = "2205.04332",
+            archivePrefix = "arXiv",
+            primaryClass = "gr-qc",
+            doi = "10.1093/mnras/stac2810",
+            month = "5",
+            year = "2022"
+}
 
-In addition, the code very heavily relies on the open-source code, [parallel bilby](https://git.ligo.org/lscsoft/parallel_bilby). Appropriate acknowledgements have been made in the paper [Samajdar *et al.*](https://arxiv.org/abs/2205.04332).
+In addition, the code very heavily relies on the open-source code, [parallel bilby](https://git.ligo.org/lscsoft/parallel_bilby). Appropriate acknowledgements have been made in the paper [Samajdar *et al.*](https://doi.org/10.1093/mnras/stac2810).
 
 <p align="middle">
   <img src="https://user-images.githubusercontent.com/108532307/177641610-73d9221c-34fc-4aec-afc0-0dbcfae65ccc.jpg" width="45%" />
