@@ -5,9 +5,10 @@ import sys
 import timeit
 import traceback
 
-from schwimmbad import _VERBOSE, MPIPool, log
-
-
+from schwimmbad import MPIPool
+import logging
+log = logging.getLogger(__name__)
+_VERBOSE=5
 def _dummy_callback(x):
     pass
 

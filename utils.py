@@ -1,5 +1,7 @@
 from pandas import DataFrame
 import numpy as np, os, dill, shutil, timeit
+import bilby
+import signal
 
 def rejection_sample(posterior, weights):
     """ Perform rejection sampling on a posterior using weights
@@ -41,7 +43,8 @@ def get_initial_point_from_prior(args):
             if calculate_likelihood:
                 logl = log_likelihood_function(theta)
                 if abs(logl) not in bad_values:
-                    return unit, theta, logl
+                    if str(logl) != "nan":
+                        return unit, theta, logl
             else:
                 return unit, theta, np.nan
 
@@ -95,12 +98,71 @@ def read_saved_state(resume_file, continuing=True):
             if sampler.added_live and continuing:
                 sampler._remove_live_points()
             sampler.nqueue = -1
-            sampler.rstate = np.random
+            #sampler.rstate = np.random
             sampling_time = sampler.kwargs.pop("sampling_time")
         return sampler, sampling_time
     else:
         print("Resume file {} does not exist.".format(resume_file))
         return False, 0
+
+def signal_wrapper(method):
+    """
+    Decorator to wrap a method of a class to set system signals before running
+    and reset them after.
+
+    Parameters
+    ==========
+    method: callable
+        The method to call, this assumes the first argument is `self`
+        and that `self` has a `write_current_state_and_exit` method.
+
+    Returns
+    =======
+    output: callable
+        The wrapped method.
+    """
+
+    def wrapped(self, *args, **kwargs):
+        try:
+            old_term = signal.signal(signal.SIGTERM, write_current_state_on_kill)
+            old_int = signal.signal(signal.SIGINT, write_current_state_on_kill)
+            old_alarm = signal.signal(signal.SIGALRM, write_current_state_on_kill)
+            _set = True
+        except (AttributeError, ValueError):
+            _set = False
+
+        output = method(self, *args, **kwargs)
+        if _set:
+            signal.signal(signal.SIGTERM, old_term)
+            signal.signal(signal.SIGINT, old_int)
+            signal.signal(signal.SIGALRM, old_alarm)
+        return output
+
+    return wrapped
+
+def write_current_state_on_kill(self, signum=None, frame=None):
+    """
+    Make sure that if a pool of jobs is running only the parent tries to
+    checkpoint and exit. Only the parent has a 'pool' attribute.
+
+    For samplers that must hard exit (typically due to non-Python process)
+    use :code:`os._exit` that cannot be excepted. Other samplers exiting
+    can be caught as a :code:`SystemExit`.
+    """
+    #if self.pool.rank == 0:
+    print("Killed, writing and exiting.")
+    write_current_state(self.sampler, self.resume_file, self.sampling_time, self.rotate_checkpoints)
+    _close_pool()
+    os._exit(130)
+
+
+def _close_pool(self):
+    
+    print("Starting to close worker pool.")
+    self.pool.close()
+    self.pool = None
+    print("Finished closing worker pool.")
+
 
 def safe_file_dump(data, filename, module):
     """Safely dump data to a .pickle file
@@ -146,6 +208,8 @@ def write_current_state(sampler, resume_file, sampling_time, rotate=False):
     else:
         print("Cannot write pickle resume file!")
 
+
+
 def write_sample_dump(sampler, samples_file, search_parameter_keys):
     """Writes a checkpoint file
     Parameters
@@ -153,9 +217,9 @@ def write_sample_dump(sampler, samples_file, search_parameter_keys):
     sampler: dynesty.NestedSampler
         The sampler object itself
     """
-    ln_weights = sampler.saved_logwt - sampler.saved_logz[-1]
+    ln_weights = sampler.results.logwt - sampler.results.logz[-1]
     weights = np.exp(ln_weights)
-    samples = rejection_sample(np.array(sampler.saved_v), weights)
+    samples = rejection_sample(np.array(sampler.results.samples_u), weights)
     nsamples = len(samples)
     # If we don't have enough samples, don't dump them
     if nsamples < 100:
@@ -199,3 +263,224 @@ def reorder_loglikelihoods(unsorted_loglikelihoods, unsorted_samples, sorted_sam
         idxs.append(idx[0])
     return unsorted_loglikelihoods[idxs]
 
+
+def plot_current_state(sampler, outdir, label, search_parameter_keys):
+    """
+    Make diagonstic plots of the history and current state of the sampler.
+
+    These plots are a mixture of :code:`dynesty` implemented run and trace
+    plots and our custom stats plot. We also make a copy of the trace plot
+    using the unit hypercube samples to reflect the internal state of the
+    sampler.
+
+    Any errors during plotting should be handled so that sampling can
+    continue.
+    """
+    #if self.check_point_plot:
+    import dynesty.plotting as dyplot
+    import matplotlib.pyplot as plt
+
+    labels = ["_".join(label.split("_")[1:]) for label in search_parameter_keys]
+    try:
+        filename = f"{outdir}/{label}_checkpoint_trace.png"
+        fig = dyplot.traceplot(sampler.results, labels=labels)[0]
+        fig.tight_layout()
+        fig.savefig(filename)
+    except (
+        RuntimeError,
+        np.linalg.linalg.LinAlgError,
+        ValueError,
+        OverflowError,
+    ) as e:
+        print(e)
+        print("Failed to create dynesty state plot at checkpoint")
+    except Exception as e:
+        print(
+            f"Unexpected error {e} in dynesty plotting. "
+            "Please report at git.ligo.org/lscsoft/bilby/-/issues"
+        )
+    finally:
+        plt.close("all")
+    try:
+        filename = f"{outdir}/{label}_checkpoint_trace_unit.png"
+        from copy import deepcopy
+
+        from dynesty.utils import results_substitute
+
+        temp = deepcopy(sampler.results)
+        temp = results_substitute(temp, dict(samples=temp["samples_u"]))
+        fig = dyplot.traceplot(temp, labels=labels)[0]
+        fig.tight_layout()
+        fig.savefig(filename)
+    except (
+        RuntimeError,
+        np.linalg.linalg.LinAlgError,
+        ValueError,
+        OverflowError,
+    ) as e:
+        print(e)
+        print("Failed to create dynesty unit state plot at checkpoint")
+    except Exception as e:
+        print(
+            f"Unexpected error {e} in dynesty plotting. "
+            "Please report at git.ligo.org/lscsoft/bilby/-/issues"
+        )
+    finally:
+        plt.close("all")
+    try:
+        filename = f"{outdir}/{label}_checkpoint_run.png"
+        fig, _ = dyplot.runplot(
+            sampler.results, logplot=False, use_math_text=False
+        )
+        fig.tight_layout()
+        plt.savefig(filename)
+    except (
+        RuntimeError,
+        np.linalg.linalg.LinAlgError,
+        ValueError,
+        OverflowError,
+    ) as e:
+        print(e)
+        print("Failed to create dynesty run plot at checkpoint")
+    except Exception as e:
+        print(
+            f"Unexpected error {e} in dynesty plotting. "
+            "Please report at git.ligo.org/lscsoft/bilby/-/issues"
+        )
+    finally:
+        plt.close("all")
+    try:
+        filename = f"{outdir}/{label}_corner.png"
+        fig, _ = dyplot.cornerplot(
+            sampler.results, labels=labels, use_math_text=False, show_titles=True, title_fmt=".2f", title_kwargs=dict(fontsize=16)
+        )
+        #try:
+        fig.tight_layout()
+        #except:
+            #print("tight layout issue")
+        plt.savefig(filename)
+    except (
+        RuntimeError,
+        np.linalg.linalg.LinAlgError,
+        ValueError,
+        OverflowError,
+    ) as e:
+        print(e)
+        print("Failed to create dynesty run plot at checkpoint")
+    except Exception as e:
+        print(
+            f"Unexpected error {e} in dynesty plotting. "
+            "Please report at git.ligo.org/lscsoft/bilby/-/issues"
+        )
+    finally:
+        plt.close("all")
+    try:
+        filename = f"{outdir}/{label}_checkpoint_stats.png"
+        fig, _ = dynesty_stats_plot(sampler)
+        try:
+            fig.tight_layout()
+        except:
+            print("tight layout issue")
+        plt.savefig(filename)
+    except (RuntimeError, ValueError, OverflowError) as e:
+        print(e)
+        print("Failed to create dynesty stats plot at checkpoint")
+    except DynestySetupError:
+        print("Cannot create Dynesty stats plot with dynamic sampler.")
+    except Exception as e:
+        print(
+            f"Unexpected error {e} in dynesty plotting. "
+            "Please report at git.ligo.org/lscsoft/bilby/-/issues"
+        )
+    finally:
+        plt.close("all")
+
+
+def dynesty_stats_plot(sampler):
+    """
+    Plot diagnostic statistics from a dynesty run
+
+    The plotted quantities per iteration are:
+
+    - nc: the number of likelihood calls
+    - scale: the number of accepted MCMC steps if using :code:`bound="live"`
+      or :code:`bound="live-multi"`, otherwise, the scale applied to the MCMC
+      steps
+    - lifetime: the number of iterations a point stays in the live set
+
+    There is also a histogram of the lifetime compared with the theoretical
+    distribution. To avoid edge effects, we discard the first 6 * nlive
+
+    Parameters
+    ----------
+    sampler: dynesty.sampler.Sampler
+        The sampler object containing the run history.
+
+    Returns
+    -------
+    fig: matplotlib.pyplot.figure.Figure
+        Figure handle for the new plot
+    axs: matplotlib.pyplot.axes.Axes
+        Axes handles for the new plot
+
+    """
+    import matplotlib.pyplot as plt
+    from scipy.stats import geom, ks_1samp
+
+    fig, axs = plt.subplots(nrows=4, figsize=(8, 8))
+    data = sampler.saved_run.D
+    for ax, name in zip(axs, ["nc", "scale"]):
+        ax.plot(data[name], color="blue")
+        ax.set_ylabel(name.title())
+    lifetimes = np.arange(len(data["it"])) - data["it"]
+    axs[-2].set_ylabel("Lifetime")
+    if not hasattr(sampler, "nlive"):
+        raise DynestySetupError("Cannot make stats plot for dynamic sampler.")
+    nlive = sampler.nlive
+    burn = int(geom(p=1 / nlive).isf(1 / 2 / nlive))
+    if len(data["it"]) > burn + sampler.nlive:
+        axs[-2].plot(np.arange(0, burn), lifetimes[:burn], color="grey")
+        axs[-2].plot(
+            np.arange(burn, len(lifetimes) - nlive),
+            lifetimes[burn:-nlive],
+            color="blue",
+        )
+        axs[-2].plot(
+            np.arange(len(lifetimes) - nlive, len(lifetimes)),
+            lifetimes[-nlive:],
+            color="red",
+        )
+        lifetimes = lifetimes[burn:-nlive]
+        ks_result = ks_1samp(lifetimes, geom(p=1 / nlive).cdf)
+        axs[-1].hist(
+            lifetimes,
+            bins=np.linspace(0, 6 * nlive, 60),
+            histtype="step",
+            density=True,
+            color="blue",
+            label=f"p value = {ks_result.pvalue:.3f}",
+        )
+        axs[-1].plot(
+            np.arange(1, 6 * nlive),
+            geom(p=1 / nlive).pmf(np.arange(1, 6 * nlive)),
+            color="red",
+        )
+        axs[-1].set_xlim(0, 6 * nlive)
+        axs[-1].legend()
+        axs[-1].set_yscale("log")
+    else:
+        axs[-2].plot(
+            np.arange(0, len(lifetimes) - nlive), lifetimes[:-nlive], color="grey"
+        )
+        axs[-2].plot(
+            np.arange(len(lifetimes) - nlive, len(lifetimes)),
+            lifetimes[-nlive:],
+            color="red",
+        )
+    axs[-2].set_yscale("log")
+    axs[-2].set_xlabel("Iteration")
+    axs[-1].set_xlabel("Lifetime")
+    return fig, axs
+
+class DynestySetupError(Exception):
+    pass
